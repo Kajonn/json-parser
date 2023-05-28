@@ -2,6 +2,7 @@ use std::{collections::HashMap, str::Chars};
 
 // All strings are slices to prevent copies.
 // Original json must be retained 
+#[derive(Debug)]
 pub enum JsonValue<'a> {
     Nothing,
     StringRef(&'a str),
@@ -11,6 +12,7 @@ pub enum JsonValue<'a> {
     Array(Vec<JsonValue<'a>>)
 }
 
+#[derive(Debug)]
 pub struct Json<'a> {
     pub fields: HashMap<&'a str, JsonValue<'a>>
 }
@@ -140,7 +142,8 @@ impl<'a> JsonBuilder<'a> {
     }
 
     fn set_current_value(&mut self) {
-
+        println!("Set current value");
+                    
         if let Some(_value) = &self.currentValue  {
 
             let currentObject = self.jsonBuildStack.first_mut().expect("No current json build");
@@ -151,7 +154,8 @@ impl<'a> JsonBuilder<'a> {
 
             } else if let JsonValue::Object(object)  = currentObject {
                 if let Some(_tag) = &self.currentTag {
-    
+                    
+                    println!("Setting {} ", _tag);
                     object.as_mut().fields.insert(self.currentTag.take().unwrap(), self.currentValue.take().unwrap());
             
                 }
@@ -192,10 +196,10 @@ impl<'a> JsonBuilder<'a> {
 
     fn end_current_object_or_array(&mut self){
 
-        if let Some(currentJson) = self.jsonBuildStack.pop() {    
-            // Add to parent json or array
-            if self.jsonBuildStack.is_empty() {
+        if self.jsonBuildStack.len() > 1 {
 
+            if let Some(currentJson) = self.jsonBuildStack.pop() {    
+            // Add to parent json or array            
                 let currentObject = self.jsonBuildStack.first_mut().expect("No current json build");
                 if let JsonValue::Array(array) = currentObject {
                     
