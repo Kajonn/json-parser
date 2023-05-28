@@ -1,7 +1,7 @@
 
 fn main() {
 
-    let json_str = r#"{"name":"jonas"}"#;
+    let json_str = r#"{"name":{"first":"jonas"}}"#;
 
     let parsed = json_parser::parse(json_str);
 

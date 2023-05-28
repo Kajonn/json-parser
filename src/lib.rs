@@ -34,6 +34,7 @@ pub struct JsonBuilder<'a> {
     
     inArray: bool,
     jsonBuildStack: Vec< JsonValue<'a> >,
+    tagStack: Vec<&'a str>,
 }
 
 impl<'a> JsonBuilder<'a> {
@@ -44,7 +45,8 @@ impl<'a> JsonBuilder<'a> {
             currentValue: None,
             currentTag: None,
             inArray: false,
-            jsonBuildStack: Vec::new()
+            jsonBuildStack: Vec::new(),
+            tagStack: Vec::new()
         };
 
         builder.jsonBuildStack.push( JsonValue::Object(Box::new(Json::new())));
@@ -76,9 +78,11 @@ impl<'a> JsonBuilder<'a> {
             if c=='\n' || c==' ' ||  c==',' || c==':' {
                 return self.parse_next_value(st); 
             } else if c=='"' {
-                
+                println!("Setting text");
                 //Get string
                 let (newst, text) = self.read_string(st);
+                dbg!(&newst);
+                dbg!(&text);
                 if let Some(t) = text {
                     //Array values do not have tags 
                     if self.currentTag.is_none() && !self.inArray {
@@ -146,7 +150,7 @@ impl<'a> JsonBuilder<'a> {
                     
         if let Some(_value) = &self.currentValue  {
 
-            let currentObject = self.jsonBuildStack.first_mut().expect("No current json build");
+            let currentObject = self.jsonBuildStack.last_mut().expect("No current json build");
             if let JsonValue::Array(array) = currentObject {
                 
                 array.push(self.currentValue.take().unwrap());
@@ -154,10 +158,12 @@ impl<'a> JsonBuilder<'a> {
 
             } else if let JsonValue::Object(object)  = currentObject {
                 if let Some(_tag) = &self.currentTag {
-                    
+                    dbg!(&object);
+                    dbg!(_value);
                     println!("Setting {} ", _tag);
                     object.as_mut().fields.insert(self.currentTag.take().unwrap(), self.currentValue.take().unwrap());
-            
+                    dbg!(&object);
+                    
                 }
             }
         }
@@ -185,34 +191,44 @@ impl<'a> JsonBuilder<'a> {
     fn begin_next_object(&mut self) {
         if let Some(tag) = &self.currentTag  {        
             // Push new json to stack
+            println!("Add json {}", tag);
             self.jsonBuildStack.push(JsonValue::Object(Box::new(Json::new())));
+            self.tagStack.push(self.currentTag.take().unwrap());            
         } //else cannot set unnamed object TODO warning
     }
 
     fn begin_next_array(&mut self) {
-        // Push new array to stack
-        self.jsonBuildStack.push(JsonValue::Array(Vec::new()));        
+        if let Some(tag) = &self.currentTag  {                
+            // Push new array to stack
+            self.jsonBuildStack.push(JsonValue::Array(Vec::new()));
+            self.tagStack.push(self.currentTag.take().unwrap());
+        }        
     }
 
     fn end_current_object_or_array(&mut self){
 
         if self.jsonBuildStack.len() > 1 {
 
-            if let Some(currentJson) = self.jsonBuildStack.pop() {    
-            // Add to parent json or array            
-                let currentObject = self.jsonBuildStack.first_mut().expect("No current json build");
-                if let JsonValue::Array(array) = currentObject {
-                    
-                    array.push(currentJson);
+            if let Some(currentJson) = self.jsonBuildStack.pop() {  
+                // Add to parent json or array            
+                    let currentObject = self.jsonBuildStack.last_mut().expect("No current json build");
+                    if let JsonValue::Array(array) = currentObject {
+                        
+                        array.push(currentJson);
 
-                } else if let JsonValue::Object(object)  = currentObject {
-                    
-                    object.as_mut().fields.insert(self.currentTag.take().unwrap(), currentJson);
-                
-                }
+                    } else if let JsonValue::Object(object)  = currentObject {
+                        if let Some(tag) = self.tagStack.pop() {    
+                            println!("Set json value {}", tag);
+                            dbg!(&object);
+                            dbg!(&currentJson);
+        
+                            object.as_mut().fields.insert(tag, currentJson);
+                            dbg!(&object);
+                            
+                    }
+                }    
             }
         }
-        
     }
 
 }
