@@ -49,7 +49,7 @@ impl<'a> JsonBuilder<'a> {
 
         builder.json_build_stack.push( JsonValue::Object(json));
         
-        builder.parse_next_value(json_str); 
+        let _end_str = builder.parse_next_value(json_str); 
         
         // Return parsed json
         if let Some(json) = builder.json_build_stack.pop() {
@@ -71,7 +71,7 @@ impl<'a> JsonBuilder<'a> {
          //Original iterator is needed when parsing numbers
         let st_orig = st.clone();
         if let Some(c) = st.next() {
-            dbg!(c);
+            //dbg!(c);
 
             if c=='\n' || c==' ' ||  c==',' || c==':' {
                 return self.parse_next_value(st); 
@@ -83,7 +83,7 @@ impl<'a> JsonBuilder<'a> {
                     if self.current_tag.is_none() && !self.is_in_array() {
                         // Found tag
                         self.current_tag = Some(tag_text);              
-                    } else {
+                    } else if self.current_value.is_none() {
                         // Found string value
                         self.current_value = Some(JsonValue::StringRef(tag_text));
                         self.set_current_value(); //Sets value in object
@@ -125,7 +125,7 @@ impl<'a> JsonBuilder<'a> {
             } else {
                 // Problem with splitting the string and retaining end marker ] or } 
                 // make parsing numbers more tricky. 
-                // Evaluate number once, then iterator over it to reach next character. 
+                // Evaluate number once, then iterator over it to reach next character.
                 if self.current_value.is_none() {
                     //Try to parse number if value hasn't been set
                     let number = self.read_number(st_orig);                    
@@ -133,7 +133,7 @@ impl<'a> JsonBuilder<'a> {
                         // Found number value
                         self.current_value = Some(JsonValue::Double(num));
                         self.set_current_value(); //Sets value in object                
-                    }                
+                    }
                 }
                 return self.parse_next_value(st);
             }
@@ -154,9 +154,7 @@ impl<'a> JsonBuilder<'a> {
         //println!("Set current value");
                     
         if let Some(_value) = &self.current_value  {
-
-            dbg!(&self.current_value);
-
+           
             let current_object = self.json_build_stack.last_mut().expect("No current json build");
             if let JsonValue::Array(array) = current_object {
                 
@@ -168,9 +166,7 @@ impl<'a> JsonBuilder<'a> {
                     //dbg!(_value);
                     //println!("tag {} ", _tag);
                     object.as_mut().fields.insert(self.current_tag.take().unwrap(), self.current_value.take().unwrap());
-                    //dbg!(&object);                    
-                } else {
-                    println!("Missing tag for value in json object!");
+                    //dbg!(&object);                   
                 }
             }
         }
@@ -200,7 +196,7 @@ impl<'a> JsonBuilder<'a> {
     }
 
     fn begin_next_object(&mut self) {
-        if let Some(tag) = &self.current_tag  {        
+        if let Some(_tag) = &self.current_tag  {        
             // Push new json to stack
             //println!("Add json {}", tag);
             self.json_build_stack.push(JsonValue::Object(Box::new(Json::new())));
@@ -213,7 +209,7 @@ impl<'a> JsonBuilder<'a> {
     }
 
     fn begin_next_array(&mut self) {
-        if let Some(tag) = &self.current_tag  {                
+        if let Some(_tag) = &self.current_tag  {                
             // Push new array to stack
             self.json_build_stack.push(JsonValue::Array(Vec::new()));
             self.tag_stack.push(self.current_tag.take().unwrap());
@@ -238,7 +234,7 @@ impl<'a> JsonBuilder<'a> {
                     if let Some(tag) = self.tag_stack.pop() {    
                         //println!("Set json value {}", tag);
                         //dbg!(&object);
-                        dbg!(&current_json);
+                        //dbg!(&current_json);
     
                         object.as_mut().fields.insert(tag, current_json);
                         //dbg!(&object);
@@ -273,10 +269,11 @@ mod tests {
     use super::*;
     #[test]
     fn simple_parse() {
-        let json_str = r#"{"name":{"first":"jonas"}}"#;
+        let json_str = r#"{"name"::"jonas"}"#;
         let parsed = parse(json_str);
         
-        //assert_eq!(parsed.as_ref().fields.get("name").unwrap(), "jonas");
+        assert!(matches!( parsed.fields.get("name").unwrap(), JsonValue::StringRef("jonas") ));
+        
     }
 
     #[test]
@@ -304,10 +301,12 @@ mod tests {
         "#;
 
         let parsed = parse(json_str);
-        
+        dbg!(&parsed);
         assert_eq!(parsed.fields.len(), 11);
-        //assert_eq!(parsed.fields.get("images").unwrap()..len(), 5);
-        // assert_eq!(parsed.fields.get("category").unwrap(), "smartphones");
+        
+        assert!(matches!( parsed.fields.get("category").unwrap(), JsonValue::StringRef("smartphones") ));
+        assert!(matches!( parsed.fields.get("rating").unwrap(), JsonValue::Double(4.69) ));
+        
     }
 
     #[test]
@@ -319,7 +318,9 @@ mod tests {
         let parsed = parse(json_str);
        
         assert_eq!(parsed.fields.len(), 4);
-        //assert_eq!(parsed.fields.get("posts").unwrap().len(), 4);
+        
+        assert!(matches!( parsed.fields.get("total").unwrap(), JsonValue::Double(150.0) ));
+    
     }
  }
 
