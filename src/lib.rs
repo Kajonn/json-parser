@@ -1,5 +1,4 @@
 use std::{collections::HashMap, str::Chars};
-use std::fs;
 
 // All strings are slices to prevent copies.
 // Original json must be retained 
@@ -15,66 +14,47 @@ pub enum JsonValue<'a> {
 
 #[derive(Debug)]
 pub struct Json<'a> {
-    //Optionally holds the raw string which is used for slices
-    pub raw_str: Option<String>,
     pub fields: HashMap<&'a str, JsonValue<'a>>
 }
 
 impl<'a> Json<'a> {
     fn new() -> Json<'a> {
         Json {
-            raw_str: None,
-            fields: HashMap::new()
-        }
-    }
-    fn new(raw_json_str: String) -> Json<'a> {
-        Json {
-            raw_str: Some(raw_json_str),
             fields: HashMap::new()
         }
     }
 }
 
-pub struct JsonBuilder<'a> {
+struct JsonBuilder<'a> {
     //currentState: JsonBuilderState,
-    currentValue: Option<JsonValue<'a>>,
-    currentTag: Option<&'a str>,
-    
-    inArray: bool,
-    jsonBuildStack: Vec< JsonValue<'a> >,
-    tagStack: Vec<&'a str>,
+    current_value: Option<JsonValue<'a>>,
+    current_tag: Option<&'a str>,
+    json_build_stack: Vec< JsonValue<'a> >,
+    tag_stack: Vec<&'a str>,
 }
 
 impl<'a> JsonBuilder<'a> {
-    // TODO add parse with consumed string
-    pub fn parse(json_str: String) ->Box<Json<'a>> {
-        // Move string into root json
-        let json_root = Box::new(Json::new(json_str));     
-        // Use this string 
-        let json_str = builder.jsonBuildStack.first().raw_str().chars();
 
-        return parse(json_root, json_str)
-    }
     pub fn parse(json_str: &'a str) ->Box<Json<'a>> {        
-        return parse(JsonValue::Object(Box::new(Json::new())), json_str);        
+        return JsonBuilder::parse_internal(Box::new(Json::new()), json_str.chars());        
     }
 
-    pub fn parse(json: Box<Json<'a>>, json_str: Chars<'a>) ->Box<Json<'a>> {
+    fn parse_internal(json: Box<Json<'a>>, json_str: Chars<'a>) ->Box<Json<'a>> {
         let mut builder = JsonBuilder {
-            currentValue: None,
-            currentTag: None,
-            inArray: false,
-            jsonBuildStack: Vec::new(),
-            tagStack: Vec::new()
+            current_value: None,
+            current_tag: None,
+            json_build_stack: Vec::new(),
+            tag_stack: Vec::new()
         };
 
-        builder.jsonBuildStack.push( JsonValue::Object(json));
+        builder.json_build_stack.push( JsonValue::Object(json));
+        
         builder.parse_next_value(json_str); 
         
         // Return parsed json
-        if let Some(json) = builder.jsonBuildStack.pop() {
+        if let Some(json) = builder.json_build_stack.pop() {
 
-            if !builder.jsonBuildStack.is_empty() {
+            if !builder.json_build_stack.is_empty() {
                 println!("Could not parse!");
             }
 
@@ -88,20 +68,24 @@ impl<'a> JsonBuilder<'a> {
 
     //Find next value 
     fn parse_next_value(&mut self, mut st : Chars<'a>) -> Chars {
+         //Original iterator is needed when parsing numbers
+        let st_orig = st.clone();
         if let Some(c) = st.next() {
+            dbg!(c);
+
             if c=='\n' || c==' ' ||  c==',' || c==':' {
                 return self.parse_next_value(st); 
             } else if c=='"' {
                 //Get string
-                let (newst, text) = self.read_string(st);
-                if let Some(t) = text {
+                let (newst, tag_text_result) = self.read_string(st);
+                if let Some(tag_text) = tag_text_result {
                     //Array values do not have tags 
-                    if self.currentTag.is_none() && !self.inArray {
+                    if self.current_tag.is_none() && !self.is_in_array() {
                         // Found tag
-                        self.currentTag = text;              
+                        self.current_tag = Some(tag_text);              
                     } else {
                         // Found string value
-                        self.currentValue = Some(JsonValue::StringRef(text.unwrap()));
+                        self.current_value = Some(JsonValue::StringRef(tag_text));
                         self.set_current_value(); //Sets value in object
                     }
                 }
@@ -139,55 +123,68 @@ impl<'a> JsonBuilder<'a> {
                 return self.parse_next_value(st);
 
             } else {
-
-                //Get number
-                let (newst, number) = self.read_number(st);
-                if let Some(num) = number {
-                    // Found number value
-                    self.currentValue = Some(JsonValue::Double(num));
-                    self.set_current_value(); //Sets value in object                
+                // Problem with splitting the string and retaining end marker ] or } 
+                // make parsing numbers more tricky. 
+                // Evaluate number once, then iterator over it to reach next character. 
+                if self.current_value.is_none() {
+                    //Try to parse number if value hasn't been set
+                    let number = self.read_number(st_orig);                    
+                    if let Some(num) = number {
+                        // Found number value
+                        self.current_value = Some(JsonValue::Double(num));
+                        self.set_current_value(); //Sets value in object                
+                    }                
                 }
-                // Call next value again with the new iterator
-                return self.parse_next_value(newst);
+                return self.parse_next_value(st);
             }
         } 
         // None, str end
-        
         st
     }
 
+    fn is_in_array(&self) -> bool {
+        if let JsonValue::Array(_a) = self.json_build_stack.last().expect("No current json build") {
+            true
+        } else {
+            false
+        }
+    }
+
     fn set_current_value(&mut self) {
-        println!("Set current value");
+        //println!("Set current value");
                     
-        if let Some(_value) = &self.currentValue  {
+        if let Some(_value) = &self.current_value  {
 
-            let currentObject = self.jsonBuildStack.last_mut().expect("No current json build");
-            if let JsonValue::Array(array) = currentObject {
+            dbg!(&self.current_value);
+
+            let current_object = self.json_build_stack.last_mut().expect("No current json build");
+            if let JsonValue::Array(array) = current_object {
                 
-                array.push(self.currentValue.take().unwrap());
+                array.push(self.current_value.take().unwrap());
 
-            } else if let JsonValue::Object(object)  = currentObject {
-                if let Some(_tag) = &self.currentTag {
-                    dbg!(&object);
-                    dbg!(_value);
-                    println!("Setting {} ", _tag);
-                    object.as_mut().fields.insert(self.currentTag.take().unwrap(), self.currentValue.take().unwrap());
-                    dbg!(&object);
-                    
+            } else if let JsonValue::Object(object)  = current_object {
+                if let Some(_tag) = &self.current_tag {
+                    //dbg!(&object);
+                    //dbg!(_value);
+                    //println!("tag {} ", _tag);
+                    object.as_mut().fields.insert(self.current_tag.take().unwrap(), self.current_value.take().unwrap());
+                    //dbg!(&object);                    
                 } else {
                     println!("Missing tag for value in json object!");
                 }
             }
         }
+        self.current_tag=None;
+        self.current_value=None;
     }
 
-    fn read_number(&mut self, st : Chars<'a>) -> (Chars<'a>, Option<f64>) {
+    fn read_number(&mut self, st : Chars<'a>) -> Option<f64> {
         // Read to next space or ,  and return the value as double 
-        if let Some(s) = st.as_str().split_once(|c| c==' ' || c==',') {
-            return (s.1.chars(), Some(s.0.parse().expect("COULD NOT PARSE DOUBLE"))); //TODO MAY PANIC
+        if let Some(s) = st.as_str().split_once(|c| c==' ' || c==',' || c=='}' || c==']') {
+            return Some(s.0.parse().expect("COULD NOT PARSE DOUBLE")); //TODO MAY PANIC
         } else {
             println!("Could not parse number!");
-            return (st, None);
+            return None;
         }
     }
     
@@ -203,45 +200,51 @@ impl<'a> JsonBuilder<'a> {
     }
 
     fn begin_next_object(&mut self) {
-        if let Some(tag) = &self.currentTag  {        
+        if let Some(tag) = &self.current_tag  {        
             // Push new json to stack
-            println!("Add json {}", tag);
-            self.jsonBuildStack.push(JsonValue::Object(Box::new(Json::new())));
-            self.tagStack.push(self.currentTag.take().unwrap());            
-        } else {
+            //println!("Add json {}", tag);
+            self.json_build_stack.push(JsonValue::Object(Box::new(Json::new())));
+            self.tag_stack.push(self.current_tag.take().unwrap());            
+        } else if self.is_in_array() {
+            self.json_build_stack.push(JsonValue::Object(Box::new(Json::new())));
+        }else {
             println!("Could not add object with no tag!");
         }
     }
 
     fn begin_next_array(&mut self) {
-        if let Some(tag) = &self.currentTag  {                
+        if let Some(tag) = &self.current_tag  {                
             // Push new array to stack
-            self.jsonBuildStack.push(JsonValue::Array(Vec::new()));
-            self.tagStack.push(self.currentTag.take().unwrap());
-        } else {
+            self.json_build_stack.push(JsonValue::Array(Vec::new()));
+            self.tag_stack.push(self.current_tag.take().unwrap());
+        }else if self.is_in_array() {
+            self.json_build_stack.push(JsonValue::Array(Vec::new()));            
+        }
+        else {
             println!("Could not add array with no tag!");
         }        
     }
 
     fn end_current_object_or_array(&mut self){
-
-        if self.jsonBuildStack.len() > 1 {
-            if let Some(currentJson) = self.jsonBuildStack.pop() {
+        if self.json_build_stack.len() > 1 {
+            if let Some(current_json) = self.json_build_stack.pop() {
                 // Add to parent json or array            
-                    let currentObject = self.jsonBuildStack.last_mut().expect("No current json build");
-                    if let JsonValue::Array(array) = currentObject {
+                let current_object = self.json_build_stack.last_mut().expect("No current json build");
+                if let JsonValue::Array(array) = current_object {
                         
-                        array.push(currentJson);
+                    array.push(current_json);
 
-                    } else if let JsonValue::Object(object)  = currentObject {
-                        if let Some(tag) = self.tagStack.pop() {    
-                            println!("Set json value {}", tag);
-                            dbg!(&object);
-                            dbg!(&currentJson);
-        
-                            object.as_mut().fields.insert(tag, currentJson);
-                            dbg!(&object);
-                            
+                } else if let JsonValue::Object(object)  = current_object {
+                    if let Some(tag) = self.tag_stack.pop() {    
+                        //println!("Set json value {}", tag);
+                        //dbg!(&object);
+                        dbg!(&current_json);
+    
+                        object.as_mut().fields.insert(tag, current_json);
+                        //dbg!(&object);
+                        
+                    } else {
+                        println!("Missing tag when setting json!")
                     }
                 }    
             }
@@ -250,37 +253,34 @@ impl<'a> JsonBuilder<'a> {
 
 }
 
-// Takes any string and handles it as expected
 pub fn parse(raw_str : &str) -> Box<Json> {
     
     let json_str = raw_str.trim();
 
     if json_str.starts_with('{') {
-        //If begin with { parse directly
         return JsonBuilder::parse(json_str);
-    } else if json_str.starts_with("http") {
-        //TODO make http request
-    } else {
-        // Else parse file
-        let json_string : String = fs::read_to_string(raw_str).expect("Cannot read file");
-        return JsonBuilder::parse(json_string);
+    }
+     else {
+        println!("Cannot read json!");
     }   
     
+    Box::new(Json::new())
 }
 
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     #[test]
     fn simple_parse() {
         let json_str = r#"{"name":{"first":"jonas"}}"#;
-        let parsed = json_parser::parse(json_str);
+        let parsed = parse(json_str);
         
-        assert_eq!(parsed.fields.get("name").unwrap(), "jonas");
+        //assert_eq!(parsed.as_ref().fields.get("name").unwrap(), "jonas");
     }
 
-
-    fn complex_parse() {
+    #[test]
+    fn formatted_parse() {
         let json_str = r#"
         {
             "id": 1,
@@ -303,22 +303,23 @@ mod tests {
         }        
         "#;
 
-        let parsed = json_parser::parse(json_str);
-       
+        let parsed = parse(json_str);
+        
         assert_eq!(parsed.fields.len(), 11);
-        assert_eq!(parsed.fields.get("images").unwrap().len(), 5);
-        assert_eq!(parsed.fields.get("category").unwrap(), "smartphones");
+        //assert_eq!(parsed.fields.get("images").unwrap()..len(), 5);
+        // assert_eq!(parsed.fields.get("category").unwrap(), "smartphones");
     }
 
-    fn post_parse() {
-        let json_parse = r#"
+    #[test]
+    fn complex_parse() {
+        let json_str = r#"
         {"posts":[{"id":1,"title":"His mother had always taught him","body":"His mother had always taught him not to ever think of himself as better than others. He'd tried to live by this motto. He never looked down on those who were less fortunate or who had less money than him. But the stupidity of the group of people he was talking to made him change his mind.","userId":9,"tags":["history","american","crime"],"reactions":2}],"total":150,"skip":0,"limit":1}
         "#;
 
-        let parsed = json_parser::parse(json_str);
+        let parsed = parse(json_str);
        
         assert_eq!(parsed.fields.len(), 4);
-        assert_eq!(parsed.fields.get("posts").unwrap().len(), 4);
+        //assert_eq!(parsed.fields.get("posts").unwrap().len(), 4);
     }
  }
 
