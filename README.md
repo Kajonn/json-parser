@@ -8,5 +8,4 @@ Parser is optimistic and will return json from string with minor syntax errors.
 
 - Support file path or url as parse string input.
 - Support store String in Json object in case where string lifetime cannot be garantueed (ex file read, http request)
-- Improve number parsing
 - Simplify access of json values
