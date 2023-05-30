@@ -6,7 +6,7 @@ use std::{collections::HashMap, str::Chars};
 pub enum JsonValue<'a> {
     Nothing,
     StringRef(&'a str),
-    Integer(i32),
+    Integer(i64),
     Double(f64),
     Object(Box<Json<'a>>),
     Array(Vec<JsonValue<'a>>)
@@ -48,8 +48,16 @@ impl<'a> JsonBuilder<'a> {
         };
 
         builder.json_build_stack.push( JsonValue::Object(json));
+
+        //Advance iterator past first {
+        let mut tempst = json_str.clone();
+        while let Some(c) = tempst.next() {
+            if c=='{' {
+                break;
+            }
+        }
         
-        let _end_str = builder.parse_next_value(json_str); 
+        let _end_str = builder.parse_next_value(tempst); 
         
         // Return parsed json
         if let Some(json) = builder.json_build_stack.pop() {
@@ -69,7 +77,6 @@ impl<'a> JsonBuilder<'a> {
     //Find next value 
     fn parse_next_value(&mut self, mut st : Chars<'a>) -> Chars {
          //Original iterator is needed when parsing numbers
-        let st_orig = st.clone();
         if let Some(c) = st.next() {
             //dbg!(c);
 
@@ -123,19 +130,14 @@ impl<'a> JsonBuilder<'a> {
                 return self.parse_next_value(st);
 
             } else {
-                // Problem with splitting the string and retaining end marker ] or } 
-                // make parsing numbers more tricky. 
-                // Evaluate number once, then iterator over it to reach next character.
                 if self.current_value.is_none() {
                     //Try to parse number if value hasn't been set
-                    let number = self.read_number(st_orig);                    
-                    if let Some(num) = number {
-                        // Found number value
-                        self.current_value = Some(JsonValue::Double(num));
-                        self.set_current_value(); //Sets value in object                
-                    }
+                    let newst = self.read_number_value(c,st);                    
+                    return self.parse_next_value(newst);
+                } else {
+                    println!("Unexpected char {}!", c); 
+                    return self.parse_next_value(st);
                 }
-                return self.parse_next_value(st);
             }
         } 
         // None, str end
@@ -162,11 +164,9 @@ impl<'a> JsonBuilder<'a> {
 
             } else if let JsonValue::Object(object)  = current_object {
                 if let Some(_tag) = &self.current_tag {
-                    //dbg!(&object);
-                    //dbg!(_value);
-                    //println!("tag {} ", _tag);
                     object.as_mut().fields.insert(self.current_tag.take().unwrap(), self.current_value.take().unwrap());
-                    //dbg!(&object);                   
+                } else {
+                    println!("Missing tag when setting value in json!")
                 }
             }
         }
@@ -174,14 +174,29 @@ impl<'a> JsonBuilder<'a> {
         self.current_value=None;
     }
 
-    fn read_number(&mut self, st : Chars<'a>) -> Option<f64> {
-        // Read to next space or ,  and return the value as double 
-        if let Some(s) = st.as_str().split_once(|c| c==' ' || c==',' || c=='}' || c==']') {
-            return Some(s.0.parse().expect("COULD NOT PARSE DOUBLE")); //TODO MAY PANIC
+    fn read_number_value(&mut self, first_c  : char, st : Chars<'a>) -> Chars<'a> {
+        //Parse st as a number, return number as json value
+        //Use first_c as first char in number as st has already been advanced
+        let mut tempst = st.clone();
+        let mut number_str = first_c.to_string();
+        while let Some(c) = tempst.next() {
+            if c.is_numeric() || c=='.' || c=='-' {
+                number_str.push(c);
+            } else {
+                break;
+            }
+        }
+        if let Ok(num) = number_str.parse::<i64>() {
+            self.current_value = Some(JsonValue::Integer(num));
+            self.set_current_value();
+        } else if let Ok(num) = number_str.parse::<f64>() {
+            self.current_value = Some(JsonValue::Double(num));
+            self.set_current_value();
         } else {
             println!("Could not parse number!");
-            return None;
         }
+        //Slice st to remove number
+        st.as_str().split_at(number_str.len()-1).1.chars()   
     }
     
 
@@ -203,7 +218,7 @@ impl<'a> JsonBuilder<'a> {
             self.tag_stack.push(self.current_tag.take().unwrap());            
         } else if self.is_in_array() {
             self.json_build_stack.push(JsonValue::Object(Box::new(Json::new())));
-        }else {
+        } else {
             println!("Could not add object with no tag!");
         }
     }
@@ -232,12 +247,8 @@ impl<'a> JsonBuilder<'a> {
 
                 } else if let JsonValue::Object(object)  = current_object {
                     if let Some(tag) = self.tag_stack.pop() {    
-                        //println!("Set json value {}", tag);
-                        //dbg!(&object);
-                        //dbg!(&current_json);
-    
+       
                         object.as_mut().fields.insert(tag, current_json);
-                        //dbg!(&object);
                         
                     } else {
                         println!("Missing tag when setting json!")
@@ -269,9 +280,11 @@ mod tests {
     use super::*;
     #[test]
     fn simple_parse() {
-        let json_str = r#"{"name"::"jonas"}"#;
+        let json_str = r#"{"name":"jonas","number":10}"#;
         let parsed = parse(json_str);
         
+        dbg!(&parsed);
+
         assert!(matches!( parsed.fields.get("name").unwrap(), JsonValue::StringRef("jonas") ));
         
     }
@@ -316,10 +329,10 @@ mod tests {
         "#;
 
         let parsed = parse(json_str);
-       
+        dbg!(&parsed);
         assert_eq!(parsed.fields.len(), 4);
         
-        assert!(matches!( parsed.fields.get("total").unwrap(), JsonValue::Double(150.0) ));
+        assert!(matches!( parsed.fields.get("total").unwrap(), JsonValue::Integer(150) ));
     
     }
  }
