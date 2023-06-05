@@ -23,6 +23,107 @@ impl<'a> Json<'a> {
             fields: HashMap::new()
         }
     }
+
+    //Get value as string
+    pub fn get_string(&self, tag : &str) -> Option<&'a str> {
+        if let Some(value) = self.fields.get(tag) {
+            if let JsonValue::StringRef(s) = value {
+                return Some(s);
+            }
+        }
+        None
+    }
+
+    //Get value as integer
+    pub fn get_integer(&self, tag : &str) -> Option<i64> {
+        if let Some(value) = self.fields.get(tag) {
+            if let JsonValue::Integer(i) = value {
+                return Some(*i);
+            }
+        }
+        None
+    }
+
+    //Get value as double
+    pub fn get_double(&self, tag : &str) -> Option<f64> {
+        if let Some(value) = self.fields.get(tag) {
+            if let JsonValue::Double(d) = value {
+                return Some(*d);
+            }
+        }
+        None
+    }
+
+    //Get value as object
+    pub fn get_object(&self, tag : &str) -> Option<&Json<'a>> {
+        if let Some(value) = self.fields.get(tag) {
+            if let JsonValue::Object(o) = value {
+                return Some(o);
+            }
+        }
+        None
+    }
+
+    //Get value as array
+    pub fn get_array(&self, tag : &str) -> Option<&Vec<JsonValue<'a>>> {
+        if let Some(value) = self.fields.get(tag) {
+            if let JsonValue::Array(a) = value {
+                return Some(a);
+            }
+        }
+        None
+    }
+
+    //Get unwrapped value as string
+    pub fn get_string_unwrap(&self, tag : &str) -> &'a str {
+        if let Some(value) = self.fields.get(tag) {
+            if let JsonValue::StringRef(s) = value {
+                return s;
+            }
+        }
+        ""
+    }
+
+    //Get unwrapped value as integer
+    pub fn get_integer_unwrap(&self, tag : &str) -> i64 {
+        if let Some(value) = self.fields.get(tag) {
+            if let JsonValue::Integer(i) = value {
+                return *i;
+            }
+        }
+        0
+    }
+
+    //Get unwrapped value as double
+    pub fn get_double_unwrap(&self, tag : &str) -> f64 {
+        if let Some(value) = self.fields.get(tag) {
+            if let JsonValue::Double(d) = value {
+                return *d;
+            }
+        }
+        0.0
+    }
+
+    //Get unwrapped value as object
+    pub fn get_object_unwrap(&self, tag : &str) -> &Json<'a> {
+        if let Some(value) = self.fields.get(tag) {
+            if let JsonValue::Object(o) = value {
+                return o;
+            }
+        }
+        panic!("Could not get object with tag {}!", tag);
+    }
+
+    //Get unwrapped value as array
+    pub fn get_array_unwrap(&self, tag : &str) -> &Vec<JsonValue<'a>> {
+        if let Some(value) = self.fields.get(tag) {
+            if let JsonValue::Array(a) = value {
+                return a;
+            }
+        }
+        panic!("Could not get array with tag {}!", tag);
+    }
+
 }
 
 struct JsonBuilder<'a> {
@@ -57,7 +158,7 @@ impl<'a> JsonBuilder<'a> {
             }
         }
         
-        let _end_str = builder.parse_next_value(tempst); 
+        let _end_str = builder.parse_next(tempst); 
         
         // Return parsed json
         if let Some(json) = builder.json_build_stack.pop() {
@@ -74,76 +175,108 @@ impl<'a> JsonBuilder<'a> {
         Box::new(Json::new())
     }
 
-    //Find next value 
-    fn parse_next_value(&mut self, mut st : Chars<'a>) -> Chars {
-         //Original iterator is needed when parsing numbers
-        if let Some(c) = st.next() {
-            //dbg!(c);
-
-            if c=='\n' || c==' ' ||  c==',' || c==':' {
-                return self.parse_next_value(st); 
-            } else if c=='"' {
-                //Get string
-                let (newst, tag_text_result) = self.read_string(st);
-                if let Some(tag_text) = tag_text_result {
-                    //Array values do not have tags 
-                    if self.current_tag.is_none() && !self.is_in_array() {
-                        // Found tag
-                        self.current_tag = Some(tag_text);              
-                    } else if self.current_value.is_none() {
-                        // Found string value
-                        self.current_value = Some(JsonValue::StringRef(tag_text));
-                        self.set_current_value(); //Sets value in object
-                    }
+    //Parse next value 
+    fn parse_next(&mut self, mut st : Chars<'a>) -> Chars {
+        if let Some(c) = st.next() {                        
+            match c {
+                '\n' | ' ' |  ',' | ':' => {
+                    //Skip 
+                },
+                '"' => {
+                    st = self.parse_as_string(st);
+                },
+                '{' => {
+                    // Create a new object
+                    self.begin_next_object();
+                },
+                '}' => {
+                    // Close active object
+                    self.end_current_object_or_array();
+                },
+                '[' => {
+                    self.begin_next_array();
+                },
+                ']' => {
+                    self.end_current_object_or_array();
+                },
+                _ => {
+                    //Pass in c as iterator has already been advanced
+                    st = self.parse_as_value(c, st);
                 }
-                // Call next value again with the new iterator
-                return self.parse_next_value(newst);
-
-            } else if c=='{' {
-
-                // Create a new object
-                self.begin_next_object();
-                
-                //Keep parsing
-                return self.parse_next_value(st);
-
-            } else if c =='}' {
-
-                // Close active object
-                self.end_current_object_or_array();
-
-                //Keep parsing
-                return self.parse_next_value(st);
-
-            } else if c=='[' {
-
-                self.begin_next_array();
-                
-                //Keep parsing
-                return self.parse_next_value(st);
-
-            } else if c==']' {
-                
-                self.end_current_object_or_array();
-                
-                //Keep parsing
-                return self.parse_next_value(st);
-
-            } else {
-                if self.current_value.is_none() {
-                    //Try to parse number if value hasn't been set
-                    let newst = self.read_number_value(c,st);                    
-                    return self.parse_next_value(newst);
-                } else {
-                    println!("Unexpected char {}!", c); 
-                    return self.parse_next_value(st);
-                }
-            }
+            } 
+            //Keep parsing
+            return self.parse_next(st);
         } 
         // None, str end
         st
     }
+    
 
+    fn read_string(st : Chars<'a>) -> (Chars<'a>, Option<&'a str>) {
+        // Read to next " and return string as string 
+        if let Some(s) = st.as_str().split_once('"') {
+            return (s.1.chars(), Some(s.0)); 
+        } else {
+            println!("Could not read string!");
+            return (st, None);
+        }
+    }
+
+    fn parse_as_string(& mut self, st : Chars<'a>) -> Chars<'a> {
+
+        //Read next string and set as current tag or value
+        let (newst, tag_text_result) = Self::read_string(st);
+        if let Some(tag_text) = tag_text_result {
+            //Array values do not have tags 
+            if self.current_tag.is_none() && !self.is_in_array() {
+                // Found tag
+                self.current_tag = Some(tag_text);              
+            } else if self.current_value.is_none() {
+                // Found string value
+                self.current_value = Some(JsonValue::StringRef(tag_text));
+                self.set_current_value(); //Sets value in object
+            }
+        }
+        // Call next value again with the new iterator
+        return newst;
+    }
+
+    fn parse_as_value(& mut self, c :char, st : Chars<'a>) -> Chars<'a> {
+        if self.current_value.is_none() {
+            //Try to parse number if value hasn't been set
+            let newst = self.read_number_value(c,st);                    
+            return newst;
+        } else {
+            println!("Unexpected char {}!", c); 
+            return st;
+        }
+    }
+
+    fn read_number_value(&mut self, first_c  : char, st : Chars<'a>) -> Chars<'a> {
+        //Parse st as a number, return number as json value
+        //Use first_c as first char in number as st has already been advanced
+        let mut tempst = st.clone();
+        let mut number_str = first_c.to_string();
+        while let Some(c) = tempst.next() {
+            if c.is_numeric() || c=='.' || c=='-' {
+                number_str.push(c);
+            } else {
+                break;
+            }
+        }
+        if let Ok(num) = number_str.parse::<i64>() {
+            self.current_value = Some(JsonValue::Integer(num));
+            self.set_current_value();
+        } else if let Ok(num) = number_str.parse::<f64>() {
+            self.current_value = Some(JsonValue::Double(num));
+            self.set_current_value();
+        } else {
+            println!("Could not parse number!");
+        }
+        //Slice st to remove number
+        st.as_str().split_at(number_str.len()-1).1.chars()   
+    }
+ 
     fn is_in_array(&self) -> bool {
         if let JsonValue::Array(_a) = self.json_build_stack.last().expect("No current json build") {
             true
@@ -174,41 +307,6 @@ impl<'a> JsonBuilder<'a> {
         self.current_value=None;
     }
 
-    fn read_number_value(&mut self, first_c  : char, st : Chars<'a>) -> Chars<'a> {
-        //Parse st as a number, return number as json value
-        //Use first_c as first char in number as st has already been advanced
-        let mut tempst = st.clone();
-        let mut number_str = first_c.to_string();
-        while let Some(c) = tempst.next() {
-            if c.is_numeric() || c=='.' || c=='-' {
-                number_str.push(c);
-            } else {
-                break;
-            }
-        }
-        if let Ok(num) = number_str.parse::<i64>() {
-            self.current_value = Some(JsonValue::Integer(num));
-            self.set_current_value();
-        } else if let Ok(num) = number_str.parse::<f64>() {
-            self.current_value = Some(JsonValue::Double(num));
-            self.set_current_value();
-        } else {
-            println!("Could not parse number!");
-        }
-        //Slice st to remove number
-        st.as_str().split_at(number_str.len()-1).1.chars()   
-    }
-    
-
-    fn read_string(&mut self, st : Chars<'a>) -> (Chars<'a>, Option<&'a str>) {
-        // Read to next " and return string as string 
-        if let Some(s) = st.as_str().split_once('"') {
-            return (s.1.chars(), Some(s.0)); 
-        } else {
-            println!("Could not read string!");
-            return (st, None);
-        }
-    }
 
     fn begin_next_object(&mut self) {
         if let Some(_tag) = &self.current_tag  {        
@@ -285,7 +383,8 @@ mod tests {
         
         dbg!(&parsed);
 
-        assert!(matches!( parsed.fields.get("name").unwrap(), JsonValue::StringRef("jonas") ));
+        assert!(matches!( parsed.get_string_unwrap("name"), "jonas" ));
+        assert!(matches!( parsed.get_integer_unwrap("number"), 10 ));
         
     }
 
@@ -317,8 +416,8 @@ mod tests {
         dbg!(&parsed);
         assert_eq!(parsed.fields.len(), 11);
         
-        assert!(matches!( parsed.fields.get("category").unwrap(), JsonValue::StringRef("smartphones") ));
-        assert!(matches!( parsed.fields.get("rating").unwrap(), JsonValue::Double(4.69) ));
+        assert!(matches!( parsed.get_string_unwrap("category"), "smartphones" ));
+        assert!(matches!( parsed.get_double_unwrap("rating"), 4.69 ));
         
     }
 
@@ -332,7 +431,7 @@ mod tests {
         dbg!(&parsed);
         assert_eq!(parsed.fields.len(), 4);
         
-        assert!(matches!( parsed.fields.get("total").unwrap(), JsonValue::Integer(150) ));
+        assert!(matches!( parsed.get_integer_unwrap("total"), 150 ));
     
     }
  }
